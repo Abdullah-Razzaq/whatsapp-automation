@@ -3,8 +3,10 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- Create leads table
 CREATE TABLE IF NOT EXISTS public.leads (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    name TEXT DEFAULT 'New WhatsApp Lead',
     phone_number TEXT UNIQUE NOT NULL,
-    status TEXT DEFAULT 'NEW' CHECK (status IN ('NEW', 'NEEDS_HUMAN', 'QUALIFIED', 'CLOSED')),
+    deal_value NUMERIC DEFAULT 0,
+    stage TEXT DEFAULT 'LEAD' CHECK (stage IN ('LEAD', 'BUSY', 'CALL_BACK', 'INTERESTED', 'WON')),
     is_ai_enabled BOOLEAN DEFAULT true,
     metadata JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now()),

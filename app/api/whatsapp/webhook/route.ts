@@ -89,10 +89,10 @@ export async function POST(request: Request) {
       .eq('phone_number', from)
       .maybeSingle();
       
-    if (!lead) {
+      if (!lead) {
       const { data: newLead } = await supabase
         .from('leads')
-        .insert([{ phone_number: from, status: 'NEW', is_ai_enabled: true }])
+        .insert([{ phone_number: from, stage: 'LEAD', is_ai_enabled: true }])
         .select()
         .single();
       lead = newLead;
@@ -122,7 +122,7 @@ export async function POST(request: Request) {
       };
 
       if (isTalkToSales) {
-        updatePayload.status = 'NEEDS_HUMAN';
+        updatePayload.stage = 'CALL_BACK';
         updatePayload.is_ai_enabled = false;
       }
 

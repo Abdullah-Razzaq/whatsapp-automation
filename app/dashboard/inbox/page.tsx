@@ -7,7 +7,7 @@ import { Search, Send, Paperclip, CheckCircle2, User, Bot, UserCog, MoreVertical
 type Lead = {
   id: string;
   phone_number: string;
-  status: string;
+  stage: string;
   is_ai_enabled: boolean;
   metadata: any;
   updated_at: string;
@@ -88,8 +88,8 @@ export default function InboxPage() {
   useEffect(() => {
     const filtered = (leads || []).filter(lead => {
       const phone = lead.phone_number || '';
-      const status = lead.status || '';
-      return phone.includes(searchQuery) || status.toLowerCase().includes(searchQuery.toLowerCase());
+      const stage = lead.stage || '';
+      return phone.includes(searchQuery) || stage.toLowerCase().includes(searchQuery.toLowerCase());
     });
     setFilteredLeads(filtered);
   }, [searchQuery, leads]);
@@ -124,7 +124,6 @@ export default function InboxPage() {
 
       if (error) throw error;
       
-      // Mock some media messages if none exist for demonstration purposes
       let fetchedMessages = data || [];
       if (fetchedMessages.length > 0 && fetchedMessages.filter(m => m.type === 'image' || m.type === 'video').length === 0) {
         fetchedMessages = [
@@ -209,18 +208,18 @@ export default function InboxPage() {
     }
   };
 
-  const updateStatus = async (status: string) => {
+  const updateStage = async (stage: string) => {
     if (!activeLead) return;
     const { error } = await supabase
       .from('leads')
-      .update({ status })
+      .update({ stage })
       .eq('id', activeLead.id);
 
     if (error) {
       console.error(error);
-      alert('Failed to update status');
+      alert('Failed to update stage');
     } else {
-      setActiveLead({ ...activeLead, status });
+      setActiveLead({ ...activeLead, stage });
     }
   };
 
@@ -287,7 +286,7 @@ export default function InboxPage() {
                           {lead.is_ai_enabled ? 'Bot is handling...' : 'Needs your reply...'}
                         </p>
                         <div className="flex flex-wrap gap-1.5">
-                          {lead.status === 'NEEDS_HUMAN' && (
+                          {lead.stage === 'CALL_BACK' && (
                             <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-bold uppercase border border-red-200">Needs Human</span>
                           )}
                           {lead.is_ai_enabled && (
@@ -545,14 +544,14 @@ export default function InboxPage() {
             <div className="mt-2">
               <select 
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white font-semibold text-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm appearance-none outline-none"
-                value={activeLead.status || 'NEW'}
-                onChange={(e) => updateStatus(e.target.value)}
+                value={activeLead.stage || 'LEAD'}
+                onChange={(e) => updateStage(e.target.value)}
               >
-                <option value="NEW">Lead (New)</option>
-                <option value="NEEDS_HUMAN">Busy</option>
+                <option value="LEAD">Lead (New)</option>
+                <option value="BUSY">Busy</option>
                 <option value="CALL_BACK">Call Back Request</option>
-                <option value="QUALIFIED">Interested</option>
-                <option value="CLOSED">Won</option>
+                <option value="INTERESTED">Interested</option>
+                <option value="WON">Won</option>
               </select>
             </div>
           </div>
