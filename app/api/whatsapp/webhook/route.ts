@@ -81,25 +81,69 @@ export async function POST(request: Request) {
     }
 
     const from = message.from;
-    const messageId = message.id;
+    
+    // 1. Get or create the lead based on phone_number
+    let { data: lead } = await supabase
+      .from('leads')
+      .select('*')
+      .eq('phone_number', from)
+      .maybeSingle();
+      
+    if (!lead) {
+      const { data: newLead } = await supabase
+        .from('leads')
+        .insert([{ phone_number: from, status: 'NEW', is_ai_enabled: true }])
+        .select()
+        .single();
+      lead = newLead;
+    }
 
+    if (!lead) {
+      return new Response('Failed to get or create lead', { status: 500 });
+    }
+
+    // Handle interactive button replies
     if (message.type === 'interactive') {
       const buttonId = message.interactive?.button_reply?.id;
-
+      
       const categoryMap: Record<string, string> = {
         'btn_buyer': 'Buyer',
         'btn_supplier': 'Supplier',
         'btn_meeting': 'Meeting',
         'btn_mentorship': 'Mentorship',
       };
-
+      
       const category = categoryMap[buttonId] || 'General';
+      const isTalkToSales = buttonId === 'btn_buyer';
+
+      // Update lead metadata and conditionally turn off AI if talking to sales
+      const updatePayload: any = {
+        metadata: { ...lead.metadata, category }
+      };
+
+      if (isTalkToSales) {
+        updatePayload.status = 'NEEDS_HUMAN';
+        updatePayload.is_ai_enabled = false;
+      }
 
       await supabase
         .from('leads')
-        .upsert({ phone: from, category, status: 'NEEDS_HUMAN' }, { onConflict: 'phone' });
+        .update(updatePayload)
+        .eq('id', lead.id);
+        
+      // Save the user's interactive response to messages
+      await supabase.from('messages').insert([{
+        lead_id: lead.id,
+        sender: 'USER',
+        content: `[Button Clicked]: ${message.interactive?.button_reply?.title || buttonId}`,
+        raw_payload: message
+      }]);
 
-      await sendWhatsAppMessage(from, 'Thank you! A representative will reach out to you shortly.');
+      if (isTalkToSales) {
+         await sendWhatsAppMessage(from, 'Thank you! A representative will reach out to you shortly. AI has been paused.');
+      } else {
+         await sendWhatsAppMessage(from, 'Thanks for letting us know!');
+      }
 
       return new Response('OK', { status: 200 });
     }
@@ -107,26 +151,32 @@ export async function POST(request: Request) {
     if (message.type === 'text') {
       const text = message.text.body;
 
-      const { data: lead } = await supabase
-        .from('leads')
-        .select('status')
-        .eq('phone', from)
-        .maybeSingle();
+      // 2. Save incoming user message
+      await supabase.from('messages').insert([{
+        lead_id: lead.id,
+        sender: 'USER',
+        content: text,
+        raw_payload: message
+      }]);
 
-      if (lead?.status === 'NEEDS_HUMAN') {
+      // 3. Check if AI should respond
+      if (!lead.is_ai_enabled) {
         return new Response('OK', { status: 200 });
       }
 
+      // 4. Generate AI response
       const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
       const prompt = `You are a helpful assistant for our software/services. Answer the following query in exactly 2 concise sentences: "${text}"`;
       
       const result = await model.generateContent(prompt);
       const aiResponse = result.response.text();
 
-      await supabase.from('messages').insert([
-        { phone: from, role: 'user', content: text, message_id: messageId },
-        { phone: from, role: 'assistant', content: aiResponse },
-      ]);
+      // 5. Save AI response and send via WhatsApp
+      await supabase.from('messages').insert([{
+        lead_id: lead.id,
+        sender: 'AI',
+        content: aiResponse,
+      }]);
 
       await sendWhatsAppInteractiveButtons(from, aiResponse);
     }
