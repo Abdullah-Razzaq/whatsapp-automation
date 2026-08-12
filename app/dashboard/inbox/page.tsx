@@ -30,6 +30,11 @@ export default function InboxPage() {
   const [newMessage, setNewMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
 
+  const [isLoadingLeads, setIsLoadingLeads] = useState(true);
+  const [leadsError, setLeadsError] = useState<string | null>(null);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [messagesError, setMessagesError] = useState<string | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -66,7 +71,7 @@ export default function InboxPage() {
             filter: `lead_id=eq.${activeLead.id}`
           }, 
           (payload) => {
-          setMessages(prev => [...prev, payload.new as Message]);
+          setMessages(prev => [...(prev || []), payload.new as Message]);
           scrollToBottom();
         })
         .subscribe();
@@ -80,34 +85,51 @@ export default function InboxPage() {
   }, [activeLead]);
 
   useEffect(() => {
-    const filtered = leads.filter(lead => 
-      lead.phone_number.includes(searchQuery) || 
-      lead.status.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const filtered = (leads || []).filter(lead => {
+      const phone = lead.phone_number || '';
+      const status = lead.status || '';
+      return phone.includes(searchQuery) || status.toLowerCase().includes(searchQuery.toLowerCase());
+    });
     setFilteredLeads(filtered);
   }, [searchQuery, leads]);
 
   const fetchLeads = async () => {
-    const { data, error } = await supabase
-      .from('leads')
-      .select('*')
-      .order('updated_at', { ascending: false });
-      
-    if (data && !error) {
-      setLeads(data);
+    try {
+      const { data, error } = await supabase
+        .from('leads')
+        .select('*')
+        .order('updated_at', { ascending: false });
+        
+      if (error) throw error;
+      setLeads(data || []);
+    } catch (err: any) {
+      console.error(err);
+      setLeadsError(err.message || 'Failed to fetch leads');
+      setLeads([]);
+    } finally {
+      setIsLoadingLeads(false);
     }
   };
 
   const fetchMessages = async (leadId: string) => {
-    const { data, error } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('lead_id', leadId)
-      .order('created_at', { ascending: true });
+    setIsLoadingMessages(true);
+    setMessagesError(null);
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('lead_id', leadId)
+        .order('created_at', { ascending: true });
 
-    if (data && !error) {
-      setMessages(data);
+      if (error) throw error;
+      setMessages(data || []);
       setTimeout(scrollToBottom, 100);
+    } catch (err: any) {
+      console.error(err);
+      setMessagesError(err.message || 'Failed to load messages');
+      setMessages([]);
+    } finally {
+      setIsLoadingMessages(false);
     }
   };
 
@@ -189,29 +211,39 @@ export default function InboxPage() {
           />
         </div>
         <div className="flex-1 overflow-y-auto">
-          {filteredLeads.map(lead => (
-            <div 
-              key={lead.id} 
-              className={`p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${activeLead?.id === lead.id ? 'bg-blue-50' : ''}`}
-              onClick={() => setActiveLead(lead)}
-            >
-              <div className="flex justify-between items-center mb-1">
-                <span className="font-semibold">{lead.phone_number}</span>
-                <span className="text-xs text-gray-500">{new Date(lead.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-              </div>
-              <div className="flex gap-2">
-                <span className={`text-xs px-2 py-1 rounded ${lead.status === 'NEEDS_HUMAN' ? 'bg-red-100 text-red-700 font-semibold' : 'bg-gray-100 text-gray-600'}`}>
-                  {lead.status}
-                </span>
-                {lead.is_ai_enabled && (
-                  <span className="text-xs px-2 py-1 rounded bg-green-100 text-green-700 font-semibold">
-                    AI Active
-                  </span>
-                )}
-              </div>
-            </div>
-          ))}
-          {filteredLeads.length === 0 && <div className="p-4 text-gray-500 text-center">No leads found.</div>}
+          {isLoadingLeads ? (
+            <div className="p-8 text-center text-gray-500">Loading leads...</div>
+          ) : leadsError ? (
+            <div className="p-8 text-center text-red-500">Error: {leadsError}</div>
+          ) : (
+            <>
+              {(filteredLeads || []).map(lead => (
+                <div 
+                  key={lead.id} 
+                  className={`p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${activeLead?.id === lead.id ? 'bg-blue-50' : ''}`}
+                  onClick={() => setActiveLead(lead)}
+                >
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="font-semibold">{lead.phone_number || 'Unknown'}</span>
+                    <span className="text-xs text-gray-500">
+                      {lead.updated_at ? new Date(lead.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <span className={`text-xs px-2 py-1 rounded ${lead.status === 'NEEDS_HUMAN' ? 'bg-red-100 text-red-700 font-semibold' : 'bg-gray-100 text-gray-600'}`}>
+                      {lead.status || 'NEW'}
+                    </span>
+                    {lead.is_ai_enabled && (
+                      <span className="text-xs px-2 py-1 rounded bg-green-100 text-green-700 font-semibold">
+                        AI Active
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {filteredLeads.length === 0 && <div className="p-8 text-gray-500 text-center">No leads found.</div>}
+            </>
+          )}
         </div>
       </div>
 
@@ -220,7 +252,7 @@ export default function InboxPage() {
         {activeLead ? (
           <>
             {/* Header Controls */}
-            <div className="h-16 bg-white border-b border-gray-200 flex justify-between items-center px-6">
+            <div className="h-16 bg-white border-b border-gray-200 flex justify-between items-center px-6 shrink-0">
               <div>
                 <h3 className="font-bold text-lg">{activeLead.phone_number}</h3>
                 <span className="text-sm text-gray-500">
@@ -239,7 +271,7 @@ export default function InboxPage() {
                 </div>
                 <select 
                   className="p-2 border border-gray-300 rounded text-sm bg-white"
-                  value={activeLead.status}
+                  value={activeLead.status || 'NEW'}
                   onChange={(e) => updateStatus(e.target.value)}
                 >
                   <option value="NEW">NEW</option>
@@ -252,31 +284,39 @@ export default function InboxPage() {
 
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
-              {messages.map(msg => {
-                const isUser = msg.sender === 'USER';
-                const isAI = msg.sender === 'AI';
-                const isAgent = msg.sender === 'AGENT';
-                
-                return (
-                  <div key={msg.id} className={`flex ${isUser ? 'justify-start' : 'justify-end'}`}>
-                    <div className={`max-w-[70%] p-3 rounded-lg shadow-sm
-                      ${isUser ? 'bg-white border border-gray-200 text-gray-800' : ''}
-                      ${isAI ? 'bg-blue-100 text-blue-900 border border-blue-200' : ''}
-                      ${isAgent ? 'bg-blue-600 text-white' : ''}
-                    `}>
-                      <p className="text-sm">{msg.content}</p>
-                      <div className={`text-right text-[10px] mt-1 ${isAgent ? 'text-blue-200' : 'text-gray-400'}`}>
-                        {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {msg.sender}
+              {isLoadingMessages ? (
+                <div className="text-center text-gray-500 py-4">Loading messages...</div>
+              ) : messagesError ? (
+                <div className="text-center text-red-500 py-4">Error: {messagesError}</div>
+              ) : (
+                <>
+                  {(messages || []).map(msg => {
+                    const isUser = msg.sender === 'USER';
+                    const isAI = msg.sender === 'AI';
+                    const isAgent = msg.sender === 'AGENT';
+                    
+                    return (
+                      <div key={msg.id} className={`flex ${isUser ? 'justify-start' : 'justify-end'}`}>
+                        <div className={`max-w-[70%] p-3 rounded-lg shadow-sm
+                          ${isUser ? 'bg-white border border-gray-200 text-gray-800' : ''}
+                          ${isAI ? 'bg-blue-100 text-blue-900 border border-blue-200' : ''}
+                          ${isAgent ? 'bg-blue-600 text-white' : ''}
+                        `}>
+                          <p className="text-sm">{msg.content}</p>
+                          <div className={`text-right text-[10px] mt-1 ${isAgent ? 'text-blue-200' : 'text-gray-400'}`}>
+                            {msg.created_at ? new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''} • {msg.sender}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                );
-              })}
-              <div ref={messagesEndRef} />
+                    );
+                  })}
+                  <div ref={messagesEndRef} />
+                </>
+              )}
             </div>
 
             {/* Input Footer */}
-            <div className="p-4 bg-white border-t border-gray-200">
+            <div className="p-4 bg-white border-t border-gray-200 shrink-0">
               <form onSubmit={handleSendMessage} className="flex gap-2">
                 <input 
                   type="text" 
@@ -288,7 +328,7 @@ export default function InboxPage() {
                 />
                 <button 
                   type="submit" 
-                  className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
                   disabled={isSending || !newMessage.trim()}
                 >
                   {isSending ? 'Sending...' : 'Send'}
